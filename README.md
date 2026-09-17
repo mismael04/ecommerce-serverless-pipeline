@@ -78,10 +78,13 @@ ecommerce-serverless-pipeline/
 ## Deployment Instructions
 
 1. **Clone the Repository:**
+```
    git clone https://github.com/YOUR_USERNAME/ecommerce-serverless-pipeline.git
    cd ecommerce-serverless-pipeline/infrastructure
-
-2. **Initialize & Apply Infrastructure:**
+```
+3. **Initialize & Apply Infrastructure:**
+```
    terraform init
    terraform plan
    terraform apply
+```

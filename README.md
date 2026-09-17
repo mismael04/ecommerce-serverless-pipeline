@@ -51,7 +51,7 @@ For engineering leadership and data teams, this architecture delivers measurable
 * **Enterprise Security & Governance:** Built from the ground up using least-privilege IAM principles, ensuring a minimized blast radius and compliance-ready data access boundaries across Lambda, S3, and Step Functions.
 
 ## Project Structure
-
+```
 ecommerce-serverless-pipeline/
 ├── infrastructure/             # Modularized Terraform configuration
 │   ├── main.tf                 # Core providers, S3 buckets, EventBridge, Athena workgroup
@@ -66,6 +66,7 @@ ecommerce-serverless-pipeline/
 │   └── glue_job.py             # PySpark transformation and dynamic partitioning script
 ├── .gitignore                  # Excludes local state files, credentials, and temp outputs
 └── README.md                   # Project documentation
+```
 
 ## Key Engineering Highlights
 

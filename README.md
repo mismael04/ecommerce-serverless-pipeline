@@ -71,6 +71,16 @@ ecommerce-serverless-pipeline/
 └── README.md                   # Project documentation
 ```
 
+## Input Data Schema
+
+The pipeline expects raw CSV files landed in the S3 Raw Zone with the following minimum required columns (case-insensitive keys enforced by the Lambda pre-flight validator):
+
+| Column Name | Data Type | Description |
+| :--- | :--- | :--- |
+| `customerid` | String / Int | Unique identifier for the customer |
+| `quantity` | Integer | Number of items purchased in the transaction |
+| *[Other Fields]* | *Various* | *Optional fields (e.g., price, timestamp, product_id)* |
+
 ## Key Engineering Highlights
 
 * **Event-Driven Architecture:** Zero idle compute; pipelines trigger instantaneously upon file arrival with automated schema validation gates.

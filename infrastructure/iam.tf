@@ -31,7 +31,7 @@ resource "aws_sfn_state_machine" "etl_orchestrator" {
   tags     = local.common_tags
 
   definition = jsonencode({
-    Comment = "Orchestrates ETL processing ONLY the file that triggered the event, then runs Crawler",
+    Comment = "Orchestrates ETL processing ONLY the file validated by Lambda, then runs Crawler",
     StartAt = "Run Glue Job",
     States = {
       "Run Glue Job" = {
@@ -40,8 +40,8 @@ resource "aws_sfn_state_machine" "etl_orchestrator" {
         Parameters = { 
           JobName = aws_glue_job.etl_job.name,
           Arguments = { 
-            "--source_bucket.$" = "$.detail.bucket.name",
-            "--source_key.$"    = "$.detail.object.key",
+            "--source_bucket.$" = "$.bucket_name",
+            "--source_key.$"    = "$.object_key",
             "--target_path"     = "s3://${aws_s3_bucket.processed_zone.id}/"
           }
         },
@@ -74,7 +74,7 @@ resource "aws_sfn_state_machine" "etl_orchestrator" {
   })
 }
 
-# --- AMAZON EVENTBRIDGE TRIGGER ---
+# --- AMAZON EVENTBRIDGE TRIGGER (Pointing to Lambda Validator) ---
 resource "aws_cloudwatch_event_rule" "s3_trigger" {
   name          = "trigger-on-s3-upload"
   event_pattern = jsonencode({
@@ -83,24 +83,16 @@ resource "aws_cloudwatch_event_rule" "s3_trigger" {
   tags = local.common_tags
 }
 
-resource "aws_iam_role" "eventbridge_role" {
-  name = "eventbridge_sfn_invocation_role"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17", Statement = [{ Action = "sts:AssumeRole", Effect = "Allow", Principal = { Service = "events.amazonaws.com" } }]
-  })
-  tags = local.common_tags
-}
-
-resource "aws_iam_role_policy" "eb_policy" {
-  role = aws_iam_role.eventbridge_role.id
-  policy = jsonencode({
-    Version = "2012-10-17", Statement = [{ Action = "states:StartExecution", Effect = "Allow", Resource = aws_sfn_state_machine.etl_orchestrator.arn }]
-  })
-}
-
-resource "aws_cloudwatch_event_target" "sfn_target" {
+resource "aws_cloudwatch_event_target" "lambda_target" {
   rule      = aws_cloudwatch_event_rule.s3_trigger.name
-  target_id = "TriggerStepFunction"
-  arn       = aws_sfn_state_machine.etl_orchestrator.arn
-  role_arn  = aws_iam_role.eventbridge_role.arn
+  target_id = "TriggerLambdaValidator"
+  arn       = aws_lambda_function.validator.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromCloudWatch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.validator.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.s3_trigger.arn
 }

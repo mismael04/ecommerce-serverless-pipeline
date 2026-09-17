@@ -27,7 +27,7 @@ graph LR
     style D fill:#232F3E,stroke:#FF9900,stroke-width:2px,color:#fff
     style E fill:#00A4E4,stroke:#232F3E,stroke-width:2px,color:#fff
     style G fill:#3F8624,stroke:#232F3E,stroke-width:2px,color:#fff
-    ```
+```
 
 1. **Source & Pre-Flight Gatekeeper (S3, EventBridge, & Lambda):** Raw CSV data lands in the S3 Raw Zone. Amazon EventBridge catches the Object Created event instantly and routes it to an AWS Lambda validator. Lambda reads the file headers using a lightweight byte range fetch, performing case-insensitive validation for required columns (`quantity` and `customerid`). Corrupt files are blocked instantly before spawning costly compute clusters.
 2. **Orchestration (AWS Step Functions):** Triggered conditionally only upon successful validation, managing the execution lifecycle by kicking off the Spark job, starting the Glue Crawler, and running a resilient polling loop until cataloging completes.

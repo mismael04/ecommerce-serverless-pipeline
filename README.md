@@ -1,103 +1,337 @@
 # Serverless E-Commerce Data Lake & ETL Pipeline
 
-An enterprise-grade, event-driven serverless data lake and analytics pipeline built on AWS using Terraform. This project ingests, validates, cleanses, and transforms raw e-commerce transaction data at scale using Amazon Lambda, Apache Spark, automated state orchestration, and serverless querying.
+A Terraform-managed, event-driven AWS data lake and ETL pipeline for ingesting, validating, transforming, and querying e-commerce transaction data.
 
-## Architecture & Data Flow
+The pipeline uses **Amazon S3, EventBridge, Lambda, Step Functions, AWS Glue, PySpark, Athena, CloudWatch, and SNS** to create an automated serverless data workflow with pre-flight data validation, distributed transformation, Parquet storage, and operational monitoring.
 
-Data flows chronologically from left to right through an entirely serverless, zero-idle-compute architecture with strict pre-flight validation gates:
+## Architecture
 
 ```mermaid
-graph LR
-    subgraph Ingestion & Validation
-        A[S3 Raw Zone] -->|EventBridge Trigger| B(Python Lambda Validator)
-        B -->|Schema Invalid| C[CloudWatch / SNS Alarm]
-    end
+flowchart LR
 
-    subgraph Orchestration & Compute
-        B -->|Schema Valid| D[AWS Step Functions]
-        D -->|Sync Execution| E[Amazon Glue Spark Job]
-        E -->|Job Failure| H[CloudWatch / SNS Alarm]
-    end
+    A["S3<br/>Raw Zone"]
+    B["Amazon EventBridge<br/>Object Created"]
+    C["AWS Lambda<br/>Schema Validator"]
+    D{"Schema<br/>Valid?"}
 
-    subgraph Storage & Serving
-        E -->|Snappy Parquet| F[S3 Processed Zone]
-        F -->|Glue Crawler| G[Amazon Athena]
-    end
+    E["AWS Step Functions<br/>Workflow Orchestrator"]
+    F["AWS Glue<br/>PySpark ETL"]
+    G["S3<br/>Processed Zone"]
+    H["AWS Glue<br/>Crawler & Data Catalog"]
+    I["Amazon Athena<br/>SQL Analytics"]
 
-    style B fill:#FF9900,stroke:#232F3E,stroke-width:2px,color:#000
-    style D fill:#232F3E,stroke:#FF9900,stroke-width:2px,color:#fff
-    style E fill:#00A4E4,stroke:#232F3E,stroke-width:2px,color:#fff
-    style G fill:#3F8624,stroke:#232F3E,stroke-width:2px,color:#fff
-    style C fill:#D9534F,stroke:#232F3E,stroke-width:2px,color:#fff
-    style H fill:#D9534F,stroke:#232F3E,stroke-width:2px,color:#fff
+    X["Amazon SNS<br/>Failure Alerts"]
+    Y["Amazon CloudWatch<br/>Monitoring"]
+
+    A -->|"Object Created"| B
+    B --> C
+    C --> D
+
+    D -->|"No"| X
+    D -->|"Yes"| E
+
+    E -->|"Start Glue Job"| F
+    F -->|"Snappy Parquet"| G
+    G --> H
+    H -->|"Catalog Metadata"| I
+
+    E -.->|"Workflow failures"| Y
+    F -.->|"Job failures"| Y
+    C -.->|"Validation failures"| Y
+    Y --> X
+
+    E -.->|"Start / monitor crawler"| H
 ```
 
-1. **Source & Pre-Flight Gatekeeper (S3, EventBridge, & Lambda):** Raw CSV data lands in the S3 Raw Zone. Amazon EventBridge catches the Object Created event instantly and routes it to an AWS Lambda validator. Lambda reads the file headers using a lightweight byte range fetch, performing case-insensitive validation for required columns (`quantity` and `customerid`). Corrupt files are blocked instantly before spawning costly compute clusters.
-2. **Orchestration (AWS Step Functions):** Triggered conditionally only upon successful validation, managing the execution lifecycle by kicking off the Spark job, starting the Glue Crawler, and running a resilient polling loop until cataloging completes.
-3. **Transformation (Amazon Glue & PySpark):** Processes records using distributed compute, applies data cleansing (filtering negative quantities), and writes out optimized files.
-4. **Serving (Amazon Athena):** Exposes structured, high-performance data for analytical querying via the Glue Data Catalog.
+### Data Flow
 
-## Technology Stack & Architecture Justifications
+1. **Raw ingestion — S3**
+   Raw e-commerce CSV files are uploaded to the S3 Raw Zone.
 
-* **Infrastructure as Code — Terraform (~> 6.0):** Chosen over AWS CloudFormation for its modular reusability, state management, and widespread industry adoption in production environments.
-* **Pre-Flight Validation — AWS Lambda (Python 3.11):** Implemented to intercept malformed data at the edge, eliminating downstream compute waste and enforcing strict data contract enforcement.
-* **Compute Engine — Amazon Glue (Standard Execution Class, G.1X Workers):** Selected over Glue Flex execution to guarantee dedicated worker allocation and eliminate queue wait times during pipeline execution.
-* **Storage Format — Apache Snappy Parquet:** Chosen over raw CSV/JSON formats for its columnar compression, splitability, and drastically reduced Athena scan costs.
-* **Orchestration — AWS Step Functions:** Chosen over cron-based scheduling to achieve true event-driven reactivity and robust error retry logic.
-* **Observability & Alerting — Amazon CloudWatch & SNS:** Configured with closed-loop metric alarms (treat_missing_data = "notBreaching") to automatically reset state after incident resolution and page engineering teams instantly via email.
+2. **Event detection — EventBridge**
+   An S3 Object Created event triggers the pipeline automatically through Amazon EventBridge.
 
-## Business & Engineering Impact (Why This Matters)
+3. **Pre-flight validation — Lambda**
+   A lightweight Python Lambda function reads the uploaded file header and validates required columns such as `quantity` and `customerid`. Validation is performed before starting the downstream Glue workload.
 
-For engineering leadership and data teams, this architecture delivers measurable ROI across three key vectors:
-* **Cost Optimization & Zero Idle Spend:** By leveraging a fully serverless, event-driven model with a pre-flight validator, compute resources scale to zero when idle, and garbage data never triggers expensive Spark workloads. Furthermore, Snappy Parquet compression drastically reduces S3 storage footprints and lowers Amazon Athena query scan costs.
-* **Operational Resilience & Automation:** Automated orchestration via Step Functions with built-in retry logic and crawler state polling eliminates manual intervention. Paired with closed-loop SNS alerting, system failures and data contract violations are flagged instantly.
-* **Enterprise Security & Governance:** Built from the ground up using least-privilege IAM principles, ensuring a minimized blast radius and compliance-ready data access boundaries across Lambda, S3, and Step Functions.
+4. **Workflow orchestration — Step Functions**
+   Valid files are passed to AWS Step Functions, which coordinates the ETL workflow, including Glue job execution and cataloging.
 
-## Project Structure
+5. **Transformation — AWS Glue / PySpark**
+   The Glue Spark job cleans and transforms the source data, including filtering invalid quantities and adding ingestion metadata.
+
+6. **Optimized storage — S3 / Parquet**
+   Transformed records are written to the S3 Processed Zone in Snappy-compressed Parquet format.
+
+7. **Cataloging — Glue Crawler**
+   The crawler discovers the processed dataset structure and updates the AWS Glue Data Catalog.
+
+8. **Analytics — Athena**
+   Amazon Athena queries the cataloged Parquet dataset directly in S3.
+
+9. **Monitoring — CloudWatch / SNS**
+   CloudWatch monitors pipeline failures and validation events, with SNS providing email notifications for configured alarms.
+
+## Technology Stack
+
+| Component              | Technology              | Purpose                                 |
+| ---------------------- | ----------------------- | --------------------------------------- |
+| Infrastructure as Code | Terraform               | Provision and manage AWS infrastructure |
+| Object Storage         | Amazon S3               | Raw and processed data storage          |
+| Event Routing          | Amazon EventBridge      | Trigger pipeline on new S3 objects      |
+| Validation             | AWS Lambda / Python     | Pre-flight schema validation            |
+| Orchestration          | AWS Step Functions      | Coordinate ETL workflow                 |
+| Distributed Compute    | AWS Glue / PySpark      | Data transformation                     |
+| Data Format            | Apache Parquet / Snappy | Columnar storage and compression        |
+| Metadata               | AWS Glue Data Catalog   | Dataset and schema metadata             |
+| Query Engine           | Amazon Athena           | Serverless SQL analytics                |
+| Monitoring             | Amazon CloudWatch       | Pipeline monitoring and alarms          |
+| Alerting               | Amazon SNS              | Failure and validation notifications    |
+
+## Key Engineering Decisions
+
+### Pre-Flight Schema Validation
+
+The Lambda validator acts as a lightweight data contract gate before distributed processing begins.
+
+It:
+
+* Reads the uploaded file header using a lightweight S3 byte-range request.
+* Performs case-insensitive validation of required columns.
+* Prevents malformed files from proceeding to the Glue workload.
+* Separates inexpensive validation from more expensive distributed processing.
+
+This allows invalid inputs to be rejected before the ETL stage rather than discovering schema problems after Spark execution begins.
+
+### Event-Driven Orchestration
+
+The pipeline does not depend on a continuously running server or scheduled polling process.
+
+The workflow is triggered by an S3 object event:
+
+**S3 → EventBridge → Lambda → Step Functions → Glue**
+
+Step Functions coordinates the downstream execution and handles workflow state, retries, and crawler monitoring.
+
+### Parquet-Based Data Lake
+
+The processed dataset is stored as Snappy-compressed Parquet rather than CSV.
+
+Parquet provides:
+
+* Columnar storage
+* Compression
+* Efficient analytical reads
+* Predicate/column-based scanning
+* Better compatibility with Athena and Spark workloads
+
+This reduces the amount of data Athena needs to scan compared with querying raw CSV files in many analytical workloads.
+
+### Dynamic Partitioning
+
+The Glue transformation uses ingestion-date partitioning:
+
+```text
+ingestion_date=YYYY-MM-DD/
 ```
-ecommerce-serverless-pipeline/
-├── infrastructure/             # Modularized Terraform configuration
-│   ├── main.tf                 # Core providers, S3 buckets, EventBridge, Athena workgroup
-│   ├── glue.tf                 # Glue database, crawler, job definition, and IAM roles
-│   ├── lambda.tf               # Lambda schema validator function and least-privilege IAM
-│   ├── iam.tf                  # Step Functions orchestrator and execution IAM roles
-│   ├── monitoring.tf           # SNS topics, email subscriptions, and CloudWatch auto-reset alarms
-│   ├── outputs.tf              # Resource ARNs and bucket IDs
-│   └── variables.tf            # Global variables (AWS region, etc.)
-├── src/                        # Application source code
-│   ├── validator_lambda.py     # Pre-flight schema validation logic
-│   └── glue_job.py             # PySpark transformation and dynamic partitioning script
-├── .gitignore                  # Excludes local state files, credentials, and temp outputs
-└── README.md                   # Project documentation
-```
+
+The Spark job uses dynamic partition overwrite behavior so that individual ingestion-date partitions can be updated without unnecessarily rewriting the entire processed dataset.
+
+## Data Quality & Validation
+
+The pipeline performs validation at multiple stages.
+
+### Pre-Flight Validation
+
+Lambda checks the incoming file schema before allowing the ETL workflow to proceed.
+
+Required fields include:
+
+| Column       | Requirement |
+| ------------ | ----------- |
+| `customerid` | Required    |
+| `quantity`   | Required    |
+
+Column matching is case-insensitive.
+
+### Transformation Validation
+
+The Glue job applies data cleansing rules during transformation, including filtering invalid transaction quantities.
+
+### Operational Monitoring
+
+CloudWatch monitors workflow and processing failures, while SNS provides notification delivery for configured alarms.
+
+This creates separate visibility into:
+
+* Input validation failures
+* Step Functions failures
+* Glue processing failures
 
 ## Input Data Schema
 
-The pipeline expects raw CSV files landed in the S3 Raw Zone with the following minimum required columns (case-insensitive keys enforced by the Lambda pre-flight validator):
+The pipeline expects CSV transaction files containing at least the following fields:
 
-| Column Name | Data Type | Description |
-| :--- | :--- | :--- |
-| `customerid` | String / Int | Unique identifier for the customer |
-| `quantity` | Integer | Number of items purchased in the transaction |
-| *[Other Fields]* | *Various* | *Optional fields (e.g., price, timestamp, product_id)* |
+| Column       | Data Type        | Description                                                               |
+| ------------ | ---------------- | ------------------------------------------------------------------------- |
+| `customerid` | String / Integer | Customer identifier                                                       |
+| `quantity`   | Integer          | Number of items purchased                                                 |
+| Other fields | Various          | Additional transaction attributes such as price, timestamp, or product ID |
 
-## Key Engineering Highlights
+The Lambda validator only requires the minimum required columns, allowing additional fields to pass through to the transformation stage.
 
-* **Event-Driven Architecture:** Zero idle compute; pipelines trigger instantaneously upon file arrival with automated schema validation gates.
-* **Dynamic Partitioning:** Employs Spark partitionOverwriteMode = dynamic to safely manage ingestion-date partitioning (ingestion_date=YYYY-MM-DD) without redundant full-table overwrites.
-* **Least-Privilege Security:** Granular IAM execution roles restricting permissions strictly to required resource ARNs.
-* **Closed-Loop Observability:** Dual-layer monitoring tracking both Step Functions workflow failures and Lambda validation rejections, routing instant updates through SNS with automated alarm state resets.
+## Infrastructure as Code
 
-## Deployment Instructions
+The entire AWS environment is provisioned through Terraform.
 
-1. **Clone the Repository:**
+```text
+ecommerce-serverless-pipeline/
+├── infrastructure/
+│   ├── main.tf
+│   ├── glue.tf
+│   ├── lambda.tf
+│   ├── iam.tf
+│   ├── monitoring.tf
+│   ├── outputs.tf
+│   └── variables.tf
+│
+├── src/
+│   ├── validator_lambda.py
+│   └── glue_job.py
+│
+├── .gitignore
+└── README.md
 ```
-   git clone https://github.com/YOUR_USERNAME/ecommerce-serverless-pipeline.git
-   cd ecommerce-serverless-pipeline/infrastructure
+
+### Terraform Components
+
+* S3 raw and processed zones
+* EventBridge event routing
+* Lambda validation function
+* Step Functions state machine
+* Glue database and crawler
+* Glue ETL job
+* IAM execution roles and policies
+* Athena workgroup
+* CloudWatch alarms
+* SNS notifications
+
+## Security
+
+The infrastructure uses dedicated IAM roles and resource-scoped permissions for pipeline components.
+
+The architecture separates:
+
+* S3 storage permissions
+* Lambda execution permissions
+* Glue execution permissions
+* Step Functions execution permissions
+* Monitoring and notification permissions
+
+Sensitive Terraform state, credentials, and local configuration files are excluded through `.gitignore`.
+
+## Project Structure
+
+### `infrastructure/`
+
+Contains the Terraform configuration responsible for provisioning the AWS environment.
+
+### `src/validator_lambda.py`
+
+Contains the Lambda pre-flight validation logic.
+
+### `src/glue_job.py`
+
+Contains the PySpark transformation logic executed by AWS Glue.
+
+## Deployment
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/YOUR_USERNAME/ecommerce-serverless-pipeline.git
+cd ecommerce-serverless-pipeline/infrastructure
 ```
-3. **Initialize & Apply Infrastructure:**
+
+### 2. Initialize Terraform
+
+```bash
+terraform init
 ```
-   terraform init
-   terraform plan
-   terraform apply
+
+### 3. Review the infrastructure plan
+
+```bash
+terraform plan
 ```
+
+### 4. Deploy
+
+```bash
+terraform apply
+```
+
+## Validation
+
+After deployment, the pipeline can be validated by uploading test CSV files to the S3 Raw Zone.
+
+### Valid Input
+
+A CSV containing the required fields should follow the path:
+
+```text
+S3
+ ↓
+EventBridge
+ ↓
+Lambda validation
+ ↓
+Step Functions
+ ↓
+Glue PySpark
+ ↓
+S3 Parquet
+ ↓
+Glue Crawler
+ ↓
+Athena
+```
+
+### Invalid Input
+
+A CSV missing a required field should be rejected by the Lambda validation stage and should not proceed to the Glue transformation workload.
+
+## Engineering Highlights
+
+* **Event-driven ETL:** S3 object events automatically initiate the pipeline.
+* **Pre-flight data validation:** Invalid schemas are rejected before distributed processing.
+* **Serverless architecture:** S3, Lambda, Step Functions, Glue, and Athena provide managed/serverless infrastructure.
+* **Distributed transformation:** PySpark processes the transaction dataset using AWS Glue.
+* **Optimized storage:** Processed data is stored as Snappy-compressed Parquet.
+* **Dynamic partitioning:** Ingestion-date partitions can be updated independently.
+* **Infrastructure as Code:** AWS infrastructure is reproducibly provisioned through Terraform.
+* **Operational monitoring:** CloudWatch and SNS provide failure detection and notifications.
+
+## Production Considerations
+
+This project is designed as a portfolio implementation demonstrating production-oriented AWS data engineering patterns. A larger production deployment could further incorporate:
+
+* AWS Lake Formation governance
+* KMS customer-managed encryption keys
+* CI/CD for Terraform and ETL code
+* Data-quality frameworks such as Great Expectations or Deequ
+* Centralized logging and observability
+* Schema versioning and data contracts
+* VPC-based networking where required
+* Additional retry and dead-letter handling
+* Cost and performance monitoring
+
+## What This Project Demonstrates
+
+This project demonstrates practical experience designing and implementing an automated AWS data pipeline rather than simply querying a static dataset.
+
+The implementation covers the full lifecycle:
+
+**Ingestion → Validation → Orchestration → Transformation → Storage → Cataloging → Analytics → Monitoring**
+
+The infrastructure and application code are maintained separately, with Terraform managing the AWS environment and Python/PySpark implementing the data-processing logic.

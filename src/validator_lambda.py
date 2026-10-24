@@ -37,8 +37,8 @@ def lambda_handler(event, context):
         header = lines[0].lower()
         logger.info(f"Extracted header: {header}")
         
-        # Enforce ONLY quantity and customerid
-        required_columns = ["quantity", "customerid"]
+        # Enforce Kaggle e-commerce schema columns
+        required_columns = ["event_time", "event_type", "product_id", "user_id"]
         missing_columns = [col for col in required_columns if col not in header]
         
         if missing_columns:

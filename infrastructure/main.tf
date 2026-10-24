@@ -64,6 +64,13 @@ resource "aws_s3_object" "glue_script" {
   etag   = filemd5("../src/glue_job.py")
 }
 
+resource "aws_s3_object" "ingest_script" {
+  bucket = aws_s3_bucket.scripts.id
+  key    = "scripts/ingest_kaggle.py"
+  source = "../src/ingest_kaggle.py"
+  etag   = filemd5("../src/ingest_kaggle.py")
+}
+
 # -------------------------------------------------------------------------
 # 2. ATHENA WORKGROUP
 # -------------------------------------------------------------------------

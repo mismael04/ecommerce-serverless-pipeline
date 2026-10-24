@@ -31,7 +31,7 @@ resource "aws_sfn_state_machine" "etl_orchestrator" {
   tags     = local.common_tags
 
   definition = jsonencode({
-    Comment = "Orchestrates ETL processing ONLY the file validated by Lambda, then runs Crawler",
+    Comment = "Orchestrates event-driven e-commerce ETL processing for the uploaded file, then automatically runs the crawler",
     StartAt = "Run Glue Job",
     States = {
       "Run Glue Job" = {
@@ -42,10 +42,10 @@ resource "aws_sfn_state_machine" "etl_orchestrator" {
           Arguments = { 
             "--source_bucket.$" = "$.bucket_name",
             "--source_key.$"    = "$.object_key",
-            "--target_path"     = "s3://${aws_s3_bucket.processed_zone.id}/"
+            "--target_path"     = "s3://${aws_s3_bucket.processed_zone.id}/ecommerce_events/"
           }
         },
-        Retry = [{ ErrorEquals = ["States.ALL"], IntervalSeconds = 3, MaxAttempts = 2, BackoffRate = 1.5 }],
+        Retry = [{ ErrorEquals = ["States.ALL"], IntervalSeconds = 10, MaxAttempts = 3, BackoffRate = 2.0 }],
         Next = "Start Crawler"
       },
       "Start Crawler" = {
@@ -74,7 +74,7 @@ resource "aws_sfn_state_machine" "etl_orchestrator" {
   })
 }
 
-# --- AMAZON EVENTBRIDGE TRIGGER (Pointing to Lambda Validator) ---
+# --- AMAZON EVENTBRIDGE TRIGGER (Fully Automatic S3 -> Lambda -> SFN) ---
 resource "aws_cloudwatch_event_rule" "s3_trigger" {
   name          = "trigger-on-s3-upload"
   event_pattern = jsonencode({

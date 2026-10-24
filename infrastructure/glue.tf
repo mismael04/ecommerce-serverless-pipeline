@@ -1,6 +1,6 @@
-# --- Glue Database & Crawler ---
+# --- Database & Crawler ---
 resource "aws_glue_catalog_database" "ecommerce_db" {
-  name = "ecommerce_data_lake"
+  name = "ecommerce_lake_v2"
 }
 
 resource "aws_iam_role" "crawler_role" {
@@ -33,7 +33,7 @@ resource "aws_glue_crawler" "ecommerce_crawler" {
   role          = aws_iam_role.crawler_role.arn
   
   s3_target { 
-    path = "s3://${aws_s3_bucket.processed_zone.id}/" 
+    path = "s3://${aws_s3_bucket.processed_zone.id}/ecommerce_events/" 
   }
   
   schema_change_policy {
@@ -83,9 +83,49 @@ resource "aws_glue_job" "etl_job" {
     script_location = "s3://${aws_s3_bucket.scripts.id}/scripts/glue_job.py"
     python_version  = "3"
   }
-  execution_class   = "STANDARD"
-  glue_version      = "4.0"
-  worker_type       = "G.1X"
-  number_of_workers = 2
-  tags              = local.common_tags
+  execution_class         = "STANDARD"
+  glue_version            = "4.0"
+  worker_type             = "G.1X"
+  number_of_workers       = 2
+  job_run_queuing_enabled = true
+
+  default_arguments = {
+    "--job-bookmark-option" = "job-bookmark-enable"
+  }
+
+  tags = local.common_tags
 }
+
+# --- Glue Python Shell Ingestion Job ---
+resource "aws_glue_job" "ingest_job" {
+  name     = "ecommerce-kaggle-ingest"
+  role_arn = aws_iam_role.glue_role.arn
+  command {
+    name              = "pythonshell"
+    script_location = "s3://${aws_s3_bucket.scripts.id}/scripts/ingest_kaggle.py"
+    python_version    = "3.9"
+  }
+  default_arguments = {
+    "--S3_BUCKET_NAME" = aws_s3_bucket.raw_zone.id
+    "--additional-python-modules" = "kaggle==1.6.17"
+  }
+  max_retries   = 0
+  timeout       = 30
+  tags          = local.common_tags
+}
+
+resource "aws_iam_role_policy" "glue_secrets_policy" {
+  name = "glue_secrets_manager_read"
+  role = aws_iam_role.glue_role.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = "arn:aws:secretsmanager:us-east-1:065320271591:secret:ecommerce/kaggle/credentials-*"
+      }
+    ]
+  })
+}
+
